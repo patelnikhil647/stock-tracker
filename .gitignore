@@ -16,3 +16,8 @@ data/
 # Local overrides / secrets
 config.local.yaml
 .env
+
+# Editor swap/temp files
+*.swp
+*.swo
+*~

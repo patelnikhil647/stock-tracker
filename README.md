@@ -28,7 +28,13 @@ python3 -m venv .venv
 1. Install the **ntfy** app on your Pixel (Google Play or F-Droid).
 2. Pick a private, hard-to-guess topic name (treat it like a password — on the
    public `ntfy.sh` server anyone who knows the topic can read your alerts).
-3. In `config.yaml`, set `ntfy.topic` to that name.
+3. Create your private config and set the topic in it (see
+   [Keeping your topic private](#keeping-your-topic-private)):
+
+   ```bash
+   cp config.example.yaml config.local.yaml
+   # then edit config.local.yaml and set ntfy.topic to your private name
+   ```
 4. In the app, **Subscribe to topic** and enter the same name.
 5. Confirm it works:
 
@@ -58,11 +64,32 @@ python3 -m venv .venv
 | `stocktracker status` | Show current price, 52-wk high, drop %, and state per ticker. |
 | `stocktracker test-notify` | Send a test notification to your phone. |
 
-`check` is a **no-op outside US market hours** (configurable in `config.yaml`), so
+`check` is a **no-op outside US market hours** (configurable in your config), so
 running it on a frequent schedule is safe. Set `market_hours.enabled: false` to
 always run (useful for testing).
 
-## Configuration (`config.yaml`)
+## Keeping your topic private
+
+Your ntfy topic is effectively a password, so it must stay out of git. Config is
+layered:
+
+- **`config.example.yaml`** — committed template with defaults and a placeholder
+  topic. Safe to push to GitHub. (The placeholder is rejected at runtime so you
+  can't accidentally use it.)
+- **`config.local.yaml`** — your real config, **gitignored** so it never reaches
+  GitHub. Create it once:
+
+  ```bash
+  cp config.example.yaml config.local.yaml
+  # edit config.local.yaml -> set ntfy.topic to your private topic
+  ```
+
+At load time, `config.local.yaml` is **deep-merged over** `config.example.yaml`:
+every key you set locally wins (recursively), and anything you leave out falls back
+to the example. So `config.local.yaml` can be a full copy or hold just the keys you
+want to override (e.g. only `ntfy.topic`).
+
+## Configuration keys
 
 - `threshold` — fractional drop that triggers an alert (`0.15` = 15%).
 - `ntfy.server` / `ntfy.topic` / `ntfy.priority` — where alerts go.
@@ -134,13 +161,26 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
 .venv/bin/pytest
 ```
 
-## Roadmap (phase 2+)
+## Roadmap
 
+### Phase 1 — MVP (current)
+- Watchlist monitoring, once-per-crossing alerts, ntfy push, scheduling.
+
+### Phase 2 — Hardening, setup, and updated notifications
+- **ntfy authentication:** move beyond a secret-topic-only model by supporting ntfy
+  access tokens (Bearer) or basic auth, so even a known topic can't be read or
+  flooded by others. Adds optional `ntfy.token` (or `ntfy.user` + `ntfy.password`)
+  to config and an `Authorization` header in `notify.send`.
+- **`stocktracker init` bootstrap:** one command that copies `config.example.yaml`
+  to `config.local.yaml` and fills `ntfy.topic` with a freshly generated random
+  topic name — so you never have to invent one or risk committing it.
 - **Daily reminders:** while an ETF stays below the threshold, send a daily
   reminder until you tap "suppress"; resume only after it recovers and re-crosses.
   The state machine already has the `SUPPRESSED` state scaffolded for this.
-- **Charles Schwab integration:** auto-import your real holdings (so the watchlist
-  self-populates) and reply to an alert to buy more. Note Schwab's refresh token
-  expires every ~7 days, requiring a periodic manual re-login.
+
+### Phase 3 — Charles Schwab integration
+- Auto-import your real holdings (so the watchlist self-populates) and reply to an
+  alert to buy more. Note Schwab's refresh token expires every ~7 days, requiring a
+  periodic manual re-login.
 - **Interactive alerts:** ntfy action buttons ("Buy $X more of VOO?") that the
   laptop listens for via an ntfy command topic.
