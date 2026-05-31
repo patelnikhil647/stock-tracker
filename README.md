@@ -181,12 +181,21 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
   to config and an `Authorization` header in `notify.send`.
 - **`stocktracker init` bootstrap:** one command that copies `config.example.yaml`
   to `config.local.yaml` and fills `ntfy.topic` with a freshly generated random
-  topic name — so you never have to invent one or risk committing it.
+  topic name — so you never have to invent one or risk committing it. Also adds
+  a sample watchlist.yaml file to replace the current watchlist.yaml that is git
+  tracked.
 - **Daily reminders:** while an ETF stays below the threshold, send a daily
   reminder until you tap "suppress"; resume only after it recovers and re-crosses.
   The state machine already has the `SUPPRESSED` state scaffolded for this.
-- **Ticker validation on `add`:** reject (or warn on) symbols yfinance can't
-  resolve, so typos are caught immediately instead of failing silently every cycle.
+- **Batch `add` with validation:** accept many tickers in one command
+  (`stocktracker add VOO SCHD NVDA`). For each argument, check the symbol exists
+  (resolves via yfinance); if it does, add it to the watchlist, otherwise print a
+  warning naming that ticker and continue to the next argument. Catches typos
+  immediately instead of failing silently every cycle.
+- **Batch `remove`:** accept many tickers in one command
+  (`stocktracker remove VOO SCHD NVDA`). For each argument, remove it from the
+  watchlist; if it isn't on the watchlist, print a warning naming that ticker and
+  continue to the next argument.
 
 ### Phase 3 — Charles Schwab integration
 - Auto-import your real holdings (so the watchlist self-populates) and reply to an
