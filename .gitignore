@@ -1,0 +1,18 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Runtime data / state (do not commit your alert state)
+data/
+
+# Local overrides / secrets
+config.local.yaml
+.env
