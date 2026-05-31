@@ -86,7 +86,7 @@ def cmd_test_notify(args: argparse.Namespace) -> int:
     try:
         notify.send(
             config.ntfy,
-            title="✅ stock-tracker test",
+            title="stock-tracker test",
             message="If you can read this on your phone, ntfy is working.",
             tags="white_check_mark",
         )

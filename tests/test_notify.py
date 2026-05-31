@@ -18,6 +18,13 @@ def test_send_rejects_empty_topic():
         notify.send(_ntfy(""), title="t", message="m")
 
 
+def test_send_rejects_non_latin1_title():
+    # Emoji can't go in an HTTP header; should raise a clean NotifyError rather
+    # than an opaque UnicodeEncodeError from deep in the HTTP stack.
+    with pytest.raises(notify.NotifyError, match="non-Latin-1"):
+        notify.send(_ntfy("my-topic"), title="✅ hi", message="m")
+
+
 def test_send_posts_with_valid_topic(monkeypatch):
     calls = {}
 

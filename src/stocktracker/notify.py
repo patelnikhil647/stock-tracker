@@ -39,6 +39,17 @@ def send(
     headers = {"Title": title, "Priority": priority or ntfy.priority}
     if tags:
         headers["Tags"] = tags
+    # HTTP headers must be Latin-1 encodable. Emoji/other non-Latin-1 characters
+    # in the title would otherwise crash deep inside http.client with an opaque
+    # UnicodeEncodeError. Use the message body or ntfy `tags` for emoji instead.
+    for name, value in headers.items():
+        try:
+            value.encode("latin-1")
+        except UnicodeEncodeError as exc:
+            raise NotifyError(
+                f"ntfy header '{name}' contains non-Latin-1 characters "
+                f"({value!r}); put emoji in the message body or use tags instead."
+            ) from exc
     try:
         resp = requests.post(
             url, data=message.encode("utf-8"), headers=headers, timeout=_TIMEOUT

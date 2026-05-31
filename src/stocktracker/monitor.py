@@ -73,7 +73,7 @@ def run_cycle(config: Config, watchlist: Watchlist) -> list[TickerResult]:
 
 
 def _send_alert(config: Config, quote: prices.Quote, threshold: float) -> None:
-    title = f"\U0001F4C9 {quote.ticker} down {quote.drop_pct * 100:.1f}%"
+    title = f"{quote.ticker} down {quote.drop_pct * 100:.1f}%"
     message = (
         f"{quote.ticker} is {quote.drop_pct * 100:.1f}% below its 52-week high "
         f"(threshold {threshold * 100:.0f}%).\n"
