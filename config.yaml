@@ -1,0 +1,30 @@
+# stock-tracker configuration
+#
+# Copy-friendly defaults. Edit the ntfy topic below to a private, hard-to-guess
+# value, then subscribe to that same topic in the ntfy app on your phone.
+
+# Fraction below the 52-week high that triggers an alert. 0.15 = 15%.
+threshold: 0.15
+
+ntfy:
+  # Public ntfy server. You can self-host and change this if you prefer.
+  server: "https://ntfy.sh"
+  # CHANGE THIS to your own private topic (treat it like a password — anyone
+  # who knows the topic can read/send your notifications on the public server).
+  topic: "CHANGE-ME-stock-tracker-a1b2c3"
+  # Notification priority sent to ntfy: min, low, default, high, urgent.
+  priority: "high"
+
+# Only run the actual check during US market hours (America/New_York).
+# `check` is a no-op outside this window so an over-eager cron schedule is safe.
+# Set enabled: false to always run (useful for testing).
+market_hours:
+  enabled: true
+  timezone: "America/New_York"
+  open: "09:30"
+  close: "16:00"
+  # 0 = Monday ... 6 = Sunday
+  weekdays: [0, 1, 2, 3, 4]
+
+# Where the SQLite alert-state database lives (relative to project root).
+state_db: "data/state.db"

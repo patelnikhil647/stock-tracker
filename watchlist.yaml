@@ -1,0 +1,12 @@
+# ETFs to monitor. Manage with the CLI:
+#   stocktracker add VOO
+#   stocktracker remove VOO
+#   stocktracker list
+#
+# Each entry is a ticker symbol. Optionally override the global threshold
+# per-ticker by using a mapping instead of a bare string, e.g.:
+#   - ticker: SCHD
+#     threshold: 0.10
+tickers:
+  - VOO
+  - SCHD

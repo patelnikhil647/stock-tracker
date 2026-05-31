@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stocktracker"
+version = "0.1.0"
+description = "Personal ETF drop-alert tracker: pushes a notification when an ETF falls >15% below its 52-week high"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "yfinance>=0.2.40",
+    "requests>=2.31",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+stocktracker = "stocktracker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
