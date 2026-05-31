@@ -20,8 +20,8 @@ def _setup_logging(verbose: bool) -> None:
 
 def cmd_check(args: argparse.Namespace) -> int:
     config = cfg.load_config()
-    if not config.market_hours.is_open():
-        logging.info("Market closed — skipping check (set market_hours.enabled: false to override).")
+    if not args.ignore_market_hours and not config.market_hours.is_open():
+        logging.info("Market closed — skipping check (use -i/--ignore-market-hours to force).")
         return 0
     watchlist = cfg.load_watchlist()
     if not watchlist.entries:
@@ -102,7 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("check", help="Run one monitoring cycle (this is what cron calls)")
+    p_check = sub.add_parser("check", help="Run one monitoring cycle (this is what cron calls)")
+    p_check.add_argument(
+        "-i",
+        "--ignore-market-hours",
+        action="store_true",
+        help="Run the cycle even when the market is closed (for manual testing).",
+    )
     p_add = sub.add_parser("add", help="Add a ticker to the watchlist")
     p_add.add_argument("ticker")
     p_rm = sub.add_parser("remove", help="Remove a ticker from the watchlist")

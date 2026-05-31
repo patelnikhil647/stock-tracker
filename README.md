@@ -65,8 +65,14 @@ python3 -m venv .venv
 | `stocktracker test-notify` | Send a test notification to your phone. |
 
 `check` is a **no-op outside US market hours** (configurable in your config), so
-running it on a frequent schedule is safe. Set `market_hours.enabled: false` to
-always run (useful for testing).
+running it on a frequent schedule is safe. To force a one-off run when the market
+is closed (e.g. for testing), pass `-i` / `--ignore-market-hours`:
+
+```bash
+.venv/bin/stocktracker check --ignore-market-hours
+```
+
+To always run regardless of the clock, set `market_hours.enabled: false` instead.
 
 ## Keeping your topic private
 
@@ -165,6 +171,8 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
 
 ### Phase 1 — MVP (current)
 - Watchlist monitoring, once-per-crossing alerts, ntfy push, scheduling.
+- **`check --ignore-market-hours` (`-i`):** force a one-off cycle when the market
+  is closed, for manual testing.
 
 ### Phase 2 — Hardening, setup, and updated notifications
 - **ntfy authentication:** move beyond a secret-topic-only model by supporting ntfy
@@ -177,6 +185,8 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
 - **Daily reminders:** while an ETF stays below the threshold, send a daily
   reminder until you tap "suppress"; resume only after it recovers and re-crosses.
   The state machine already has the `SUPPRESSED` state scaffolded for this.
+- **Ticker validation on `add`:** reject (or warn on) symbols yfinance can't
+  resolve, so typos are caught immediately instead of failing silently every cycle.
 
 ### Phase 3 — Charles Schwab integration
 - Auto-import your real holdings (so the watchlist self-populates) and reply to an
@@ -184,3 +194,15 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
   periodic manual re-login.
 - **Interactive alerts:** ntfy action buttons ("Buy $X more of VOO?") that the
   laptop listens for via an ntfy command topic.
+
+### Phase 4 — Nice to have (after the phases above)
+- **Dry-run mode (`check --dry-run`):** evaluate and log what would alert, without
+  sending notifications.
+- **Recovery notifications:** a "good news" ping when an ETF climbs back above the
+  threshold (reuses the existing `ARMED` re-arm transition).
+- **Heartbeat / health-check:** a periodic "monitor is alive" notification so a
+  silently dead cron/launchd job is detectable.
+- **Alert history (`stocktracker history`):** review past alerts from the state
+  DB's `last_alert_ts`.
+- **Resilience & ergonomics:** yfinance retry/backoff; manage per-ticker thresholds
+  from the CLI (currently YAML-only).
