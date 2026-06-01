@@ -1,8 +1,8 @@
 """Load and validate config and watchlist files, and manage the watchlist.
 
-Config is layered: ``config.example.yaml`` (committed template) provides defaults,
-and an optional gitignored ``config.local.yaml`` is deep-merged over it so the
-user's real values (e.g. their private ntfy topic) never enter git.
+Both ``config.yaml`` and ``watchlist.yaml`` are gitignored and created by
+``stocktracker init`` (see templates.py), so the user's private ntfy topics never
+enter git.
 """
 
 from __future__ import annotations
@@ -17,14 +17,9 @@ import yaml
 
 # Project root = two levels up from this file (src/stocktracker/config.py).
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-# Committed template with defaults; gitignored local file holds real values.
-CONFIG_EXAMPLE_PATH = PROJECT_ROOT / "config.example.yaml"
-CONFIG_LOCAL_PATH = PROJECT_ROOT / "config.local.yaml"
+# Single gitignored config; created by `stocktracker init`.
+CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 WATCHLIST_PATH = PROJECT_ROOT / "watchlist.yaml"
-
-# Placeholder topic shipped in config.example.yaml; rejected at load time so the
-# user can't accidentally publish to (or be flooded on) the dummy topic.
-PLACEHOLDER_TOPIC = "CHANGE-ME-stock-tracker-a1b2c3"
 
 
 @dataclass
@@ -32,6 +27,9 @@ class NtfyConfig:
     server: str
     topic: str
     priority: str = "high"
+    # Private topic the tappable action buttons post to; the listener subscribes
+    # to it. Optional until the listener feature (Milestone 3) is in use.
+    command_topic: str = ""
 
 
 @dataclass
@@ -83,28 +81,12 @@ def _parse_hhmm(value: str) -> time:
     return time(int(hh), int(mm))
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge `override` onto `base`. Keys in `override` always win;
-    nested dicts are merged key-by-key, so a partial override only replaces the
-    keys it specifies. Returns a new dict; inputs are not mutated."""
-    result = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def load_config(
-    path: Path = CONFIG_EXAMPLE_PATH, local_path: Path = CONFIG_LOCAL_PATH
-) -> Config:
+def load_config(path: Path = CONFIG_PATH) -> Config:
     if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        raise FileNotFoundError(
+            f"{path.name} not found — run `stocktracker init` to create it."
+        )
     data = yaml.safe_load(path.read_text()) or {}
-    if local_path is not None and local_path.exists():
-        local_data = yaml.safe_load(local_path.read_text()) or {}
-        data = _deep_merge(data, local_data)
 
     threshold = float(data.get("threshold", 0.15))
     if not 0 <= threshold < 1:
@@ -117,6 +99,7 @@ def load_config(
         server=ntfy_data.get("server", "https://ntfy.sh").rstrip("/"),
         topic=(ntfy_data.get("topic") or "").strip(),
         priority=ntfy_data.get("priority", "high"),
+        command_topic=(ntfy_data.get("command_topic") or "").strip(),
     )
 
     mh = data.get("market_hours") or {}

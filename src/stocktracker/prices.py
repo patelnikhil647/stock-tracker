@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 import yfinance as yf
+
+# yfinance logs its own noisy ERROR lines (HTTP 404 / "possibly delisted") for
+# unknown symbols. We surface a clean PriceError instead, so silence its logger.
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 
 @dataclass

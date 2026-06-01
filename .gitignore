@@ -13,8 +13,9 @@ dist/
 # Runtime data / state (do not commit your alert state)
 data/
 
-# Local overrides / secrets
-config.local.yaml
+# Personal config & watchlist (created by `stocktracker init`; hold private topics)
+config.yaml
+watchlist.yaml
 .env
 
 # Editor swap/temp files

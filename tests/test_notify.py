@@ -1,16 +1,11 @@
 import pytest
 
 from stocktracker import notify
-from stocktracker.config import PLACEHOLDER_TOPIC, NtfyConfig
+from stocktracker.config import NtfyConfig
 
 
 def _ntfy(topic):
     return NtfyConfig(server="https://ntfy.sh", topic=topic, priority="high")
-
-
-def test_send_rejects_placeholder_topic():
-    with pytest.raises(notify.NotifyError, match="ntfy.topic is not set"):
-        notify.send(_ntfy(PLACEHOLDER_TOPIC), title="t", message="m")
 
 
 def test_send_rejects_empty_topic():

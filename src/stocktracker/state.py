@@ -81,6 +81,11 @@ class StateStore:
             updated_at=row["updated_at"],
         )
 
+    def delete(self, ticker: str) -> None:
+        """Remove a ticker's stored state (e.g. when it leaves the watchlist)."""
+        self._conn.execute("DELETE FROM ticker_state WHERE ticker = ?", (ticker.upper(),))
+        self._conn.commit()
+
     def _upsert(self, st: TickerState) -> None:
         self._conn.execute(
             """

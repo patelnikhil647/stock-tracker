@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import requests
 
-from .config import PLACEHOLDER_TOPIC, NtfyConfig
+from .config import NtfyConfig
 
 _TIMEOUT = 10
 
@@ -14,9 +14,8 @@ class NotifyError(Exception):
 
 
 _TOPIC_HELP = (
-    "ntfy.topic is not set. Copy config.example.yaml to config.local.yaml and set "
-    "your own private 'ntfy.topic' there (config.local.yaml is gitignored, so it "
-    "stays out of git)."
+    "ntfy.topic is not set. Run `stocktracker init` to create config.yaml with a "
+    "private topic (config.yaml is gitignored, so it stays out of git)."
 )
 
 
@@ -33,7 +32,7 @@ def send(
     ntfy is a simple HTTP pub-sub: the body is the message, and metadata travels
     in headers. The phone subscribes to `<server>/<topic>` in the ntfy app.
     """
-    if not ntfy.topic or ntfy.topic == PLACEHOLDER_TOPIC:
+    if not ntfy.topic:
         raise NotifyError(_TOPIC_HELP)
     url = f"{ntfy.server}/{ntfy.topic}"
     headers = {"Title": title, "Priority": priority or ntfy.priority}

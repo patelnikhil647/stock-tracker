@@ -23,20 +23,23 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-### 2. Set up phone notifications
+### 2. Initialize your config
+
+```bash
+.venv/bin/stocktracker init
+```
+
+This creates a **gitignored** `config.yaml` (with a random private ntfy topic like
+`mango-eye-llama`) and a `watchlist.yaml` seeded with `VOO`. Neither file is
+committed to git, so your private topic stays out of version control. It prints the
+generated topic — note it for the next step.
+
+### 3. Set up phone notifications
 
 1. Install the **ntfy** app on your Pixel (Google Play or F-Droid).
-2. Pick a private, hard-to-guess topic name (treat it like a password — on the
-   public `ntfy.sh` server anyone who knows the topic can read your alerts).
-3. Create your private config and set the topic in it (see
-   [Keeping your topic private](#keeping-your-topic-private)):
-
-   ```bash
-   cp config.example.yaml config.local.yaml
-   # then edit config.local.yaml and set ntfy.topic to your private name
-   ```
-4. In the app, **Subscribe to topic** and enter the same name.
-5. Confirm it works:
+2. **Subscribe to topic** and enter the alert topic that `init` printed (it's also
+   in `config.yaml` under `ntfy.topic`).
+3. Confirm it works:
 
    ```bash
    .venv/bin/stocktracker test-notify
@@ -44,11 +47,11 @@ python3 -m venv .venv
 
    You should get a notification on your phone within a second or two.
 
-### 3. Build your watchlist
+### 4. Build your watchlist
 
 ```bash
-.venv/bin/stocktracker add VOO
-.venv/bin/stocktracker add SCHD
+.venv/bin/stocktracker add VOO SCHD NVDA   # add several at once; each is validated
+.venv/bin/stocktracker remove NVDA
 .venv/bin/stocktracker list
 .venv/bin/stocktracker status     # live prices, 52-wk highs, drop %, alert state
 ```
@@ -57,9 +60,10 @@ python3 -m venv .venv
 
 | Command | What it does |
 |---------|--------------|
+| `stocktracker init` | Create `config.yaml` (random topic) + `watchlist.yaml`. `--force` overwrites. |
 | `stocktracker check` | Run one monitoring cycle (sends alerts). This is what the scheduler calls. |
-| `stocktracker add <TICKER>` | Add an ETF to the watchlist. |
-| `stocktracker remove <TICKER>` | Remove an ETF. |
+| `stocktracker add <TICKER>...` | Add one or more ETFs; each symbol is validated, unresolved ones are skipped with a warning. |
+| `stocktracker remove <TICKER>...` | Remove one or more ETFs; ones not on the watchlist are skipped with a warning. |
 | `stocktracker list` | Show watched tickers and their thresholds. |
 | `stocktracker status` | Show current price, 52-wk high, drop %, and state per ticker. |
 | `stocktracker test-notify` | Send a test notification to your phone. |
@@ -76,29 +80,18 @@ To always run regardless of the clock, set `market_hours.enabled: false` instead
 
 ## Keeping your topic private
 
-Your ntfy topic is effectively a password, so it must stay out of git. Config is
-layered:
-
-- **`config.example.yaml`** — committed template with defaults and a placeholder
-  topic. Safe to push to GitHub. (The placeholder is rejected at runtime so you
-  can't accidentally use it.)
-- **`config.local.yaml`** — your real config, **gitignored** so it never reaches
-  GitHub. Create it once:
-
-  ```bash
-  cp config.example.yaml config.local.yaml
-  # edit config.local.yaml -> set ntfy.topic to your private topic
-  ```
-
-At load time, `config.local.yaml` is **deep-merged over** `config.example.yaml`:
-every key you set locally wins (recursively), and anything you leave out falls back
-to the example. So `config.local.yaml` can be a full copy or hold just the keys you
-want to override (e.g. only `ntfy.topic`).
+Your ntfy topic is effectively a password, so it must stay out of git. Both
+`config.yaml` and `watchlist.yaml` are **gitignored** and created by
+`stocktracker init` — there is no committed config, so your private topic never
+reaches GitHub. The default config/watchlist templates live inside the package
+(`src/stocktracker/templates.py`), and `init` fills in a freshly generated random
+topic for you.
 
 ## Configuration keys
 
 - `threshold` — fractional drop that triggers an alert (`0.15` = 15%).
 - `ntfy.server` / `ntfy.topic` / `ntfy.priority` — where alerts go.
+- `ntfy.command_topic` — private topic for the (Phase 2+) tappable action buttons.
 - `market_hours` — when `check` actually runs.
 - `state_db` — path to the SQLite file that remembers alert state (gitignored).
 
@@ -174,28 +167,19 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
 - **`check --ignore-market-hours` (`-i`):** force a one-off cycle when the market
   is closed, for manual testing.
 
-### Phase 2 — Hardening, setup, and updated notifications
-- **ntfy authentication:** move beyond a secret-topic-only model by supporting ntfy
-  access tokens (Bearer) or basic auth, so even a known topic can't be read or
-  flooded by others. Adds optional `ntfy.token` (or `ntfy.user` + `ntfy.password`)
-  to config and an `Authorization` header in `notify.send`.
-- **`stocktracker init` bootstrap:** one command that copies `config.example.yaml`
-  to `config.local.yaml` and fills `ntfy.topic` with a freshly generated random
-  topic name — so you never have to invent one or risk committing it. Also adds
-  a sample watchlist.yaml file to replace the current watchlist.yaml that is git
-  tracked.
-- **Daily reminders:** while an ETF stays below the threshold, send a daily
-  reminder until you tap "suppress"; resume only after it recovers and re-crosses.
-  The state machine already has the `SUPPRESSED` state scaffolded for this.
-- **Batch `add` with validation:** accept many tickers in one command
-  (`stocktracker add VOO SCHD NVDA`). For each argument, check the symbol exists
-  (resolves via yfinance); if it does, add it to the watchlist, otherwise print a
-  warning naming that ticker and continue to the next argument. Catches typos
-  immediately instead of failing silently every cycle.
-- **Batch `remove`:** accept many tickers in one command
-  (`stocktracker remove VOO SCHD NVDA`). For each argument, remove it from the
-  watchlist; if it isn't on the watchlist, print a warning naming that ticker and
-  continue to the next argument.
+### Phase 2 — Setup, batch management, and daily reminders
+- ✅ **Batch `add`/`remove`:** accept many tickers in one command. `add` validates
+  each symbol via yfinance and skips unresolved ones with a warning; `remove` warns
+  on tickers not present and cleans up their stored state.
+- ✅ **`stocktracker init` bootstrap:** one command creates a gitignored
+  `config.yaml` (with a freshly generated random topic) and a `watchlist.yaml`
+  seeded with `VOO` — so you never have to invent a topic or risk committing it.
+- **Daily reminders + tappable suppress** (next): while an ETF stays below the
+  threshold, send a daily reminder until you tap a **Suppress** action button on
+  the notification; resume only after it recovers above threshold and re-crosses.
+  The button posts to a private `command_topic`, and a long-running
+  `stocktracker listen` service (outbound-only, no inbound exposure) applies the
+  suppress. The `SUPPRESSED` state is already scaffolded for this.
 
 ### Phase 3 — Charles Schwab integration
 - Auto-import your real holdings (so the watchlist self-populates) and reply to an
@@ -205,6 +189,10 @@ launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
   laptop listens for via an ntfy command topic.
 
 ### Phase 4 — Nice to have (after the phases above)
+- **ntfy authentication:** move beyond a secret-topic-only model by supporting ntfy
+  access tokens (Bearer) or basic auth, so even a known topic can't be read or
+  flooded by others. Only enforceable on a self-hosted ntfy server or ntfy.sh Pro
+  (free public topics have no access control).
 - **Dry-run mode (`check --dry-run`):** evaluate and log what would alert, without
   sending notifications.
 - **Recovery notifications:** a "good news" ping when an ETF climbs back above the

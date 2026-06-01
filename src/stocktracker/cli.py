@@ -7,7 +7,7 @@ import logging
 import sys
 
 from . import config as cfg
-from . import monitor, notify, prices
+from . import monitor, notify, prices, templates
 from .state import StateStore
 
 
@@ -16,6 +16,39 @@ def _setup_logging(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    """Create config.yaml (random topics) and watchlist.yaml (VOO) for a fresh setup."""
+    return run_init(
+        cfg.CONFIG_PATH, cfg.WATCHLIST_PATH, force=args.force, out=sys.stdout
+    )
+
+
+def run_init(config_path, watchlist_path, *, force: bool = False, out=sys.stdout) -> int:
+    existing = [p for p in (config_path, watchlist_path) if p.exists()]
+    if existing and not force:
+        names = ", ".join(p.name for p in existing)
+        print(
+            f"Refusing to overwrite existing {names}. Re-run with --force to replace.",
+            file=sys.stderr,
+        )
+        return 1
+
+    alert_topic = templates.random_topic()
+    command_topic = templates.random_topic()
+    config_path.write_text(templates.render_config(alert_topic, command_topic))
+    watchlist_path.write_text(templates.DEFAULT_WATCHLIST)
+
+    print(f"Created {config_path.name} and {watchlist_path.name}.", file=out)
+    print(f"  alert topic:   {alert_topic}", file=out)
+    print(f"  command topic: {command_topic}", file=out)
+    print(
+        "\nNext: install the ntfy app on your phone and subscribe to the alert "
+        f"topic '{alert_topic}', then run `stocktracker test-notify`.",
+        file=out,
+    )
+    return 0
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -32,17 +65,48 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
-    added = cfg.add_ticker(args.ticker)
-    ticker = args.ticker.strip().upper()
-    print(f"Added {ticker}." if added else f"{ticker} is already on the watchlist.")
-    return 0
+    """Add one or more tickers, validating each via yfinance first."""
+    had_error = False
+    for raw in args.tickers:
+        ticker = raw.strip().upper()
+        try:
+            prices.get_quote(ticker)
+        except prices.PriceError:
+            print(f"Warning: could not resolve '{ticker}' — skipping.", file=sys.stderr)
+            had_error = True
+            continue
+        added = cfg.add_ticker(ticker)
+        print(f"Added {ticker}." if added else f"{ticker} is already on the watchlist.")
+    return 1 if had_error else 0
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
-    removed = cfg.remove_ticker(args.ticker)
-    ticker = args.ticker.strip().upper()
-    print(f"Removed {ticker}." if removed else f"{ticker} is not on the watchlist.")
-    return 0
+    """Remove one or more tickers, warning on any not present."""
+    had_error = False
+    removed: list[str] = []
+    for raw in args.tickers:
+        ticker = raw.strip().upper()
+        if cfg.remove_ticker(ticker):
+            print(f"Removed {ticker}.")
+            removed.append(ticker)
+        else:
+            print(f"Warning: {ticker} is not on the watchlist — skipping.", file=sys.stderr)
+            had_error = True
+    _cleanup_state(removed)
+    return 1 if had_error else 0
+
+
+def _cleanup_state(tickers: list[str]) -> None:
+    """Delete state rows for removed tickers (best-effort; skipped if no config)."""
+    if not tickers:
+        return
+    try:
+        state_db = cfg.load_config().state_db
+    except Exception:
+        return  # config not set up yet — nothing to clean
+    with StateStore(state_db) as store:
+        for ticker in tickers:
+            store.delete(ticker)
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -102,6 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p_init = sub.add_parser("init", help="Create config.yaml and watchlist.yaml for a fresh setup")
+    p_init.add_argument(
+        "-f", "--force", action="store_true", help="Overwrite existing config/watchlist files."
+    )
     p_check = sub.add_parser("check", help="Run one monitoring cycle (this is what cron calls)")
     p_check.add_argument(
         "-i",
@@ -109,10 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the cycle even when the market is closed (for manual testing).",
     )
-    p_add = sub.add_parser("add", help="Add a ticker to the watchlist")
-    p_add.add_argument("ticker")
-    p_rm = sub.add_parser("remove", help="Remove a ticker from the watchlist")
-    p_rm.add_argument("ticker")
+    p_add = sub.add_parser("add", help="Add one or more tickers to the watchlist")
+    p_add.add_argument("tickers", nargs="+", metavar="TICKER")
+    p_rm = sub.add_parser("remove", help="Remove one or more tickers from the watchlist")
+    p_rm.add_argument("tickers", nargs="+", metavar="TICKER")
     sub.add_parser("list", help="List watched tickers and thresholds")
     sub.add_parser("status", help="Show current price, 52wk high, drop %, and state")
     sub.add_parser("test-notify", help="Send a test notification to your phone")
@@ -121,6 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 _HANDLERS = {
+    "init": cmd_init,
     "check": cmd_check,
     "add": cmd_add,
     "remove": cmd_remove,
