@@ -109,21 +109,37 @@ tickers:
 Pick **one** scheduler. Both call `check` every 30 minutes; the market-hours guard
 keeps off-hours runs cheap and silent.
 
+> ⚠️ **macOS: don't keep the project in `~/Documents`, `~/Desktop`, or
+> `~/Downloads`.** Those folders are protected by macOS privacy (TCC), and
+> `cron`/`launchd` jobs are denied access to them — the job fails before it starts
+> with `PermissionError: [Errno 1] Operation not permitted` (you'll see it loaded
+> but with no PID in `launchctl list`). Put the checkout somewhere unprotected like
+> `~/dev/stock-tracker`. If you must keep it in a protected folder, grant **Full
+> Disk Access** (System Settings → Privacy & Security → Full Disk Access) to the
+> venv's Python interpreter — but relocating is simpler and more reliable. The venv
+> hardcodes paths, so after moving the project, recreate it:
+> `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`.
+
+The examples below use `/Users/username/path/to/stock-tracker` — replace it with your actual
+(unprotected) checkout path.
+
 ### Option A — cron
 
 ```bash
 crontab -e
 ```
 
-Add (adjust the path to your checkout):
-
 ```cron
-*/30 * * * * /Users/nikhil.patel/Documents/Development/personal/stock-tracker/.venv/bin/stocktracker check >> /Users/nikhil.patel/Documents/Development/personal/stock-tracker/data/cron.log 2>&1
+*/30 * * * * /Users/username/path/to/stock-tracker/.venv/bin/stocktracker check >> /Users/username/path/to/stock-tracker/data/cron.log 2>&1
 ```
+
+(macOS note: `cron` is subject to the same protected-folder rule; if you keep the
+project under a protected folder you must grant Full Disk Access to `/usr/sbin/cron`.)
 
 ### Option B — macOS launchd (survives reboots cleanly)
 
-Create `~/Library/LaunchAgents/com.stocktracker.check.plist`:
+Create `~/Library/LaunchAgents/com.stocktracker.check.plist` (launchd requires
+absolute paths — `~` is not expanded):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -134,15 +150,15 @@ Create `~/Library/LaunchAgents/com.stocktracker.check.plist`:
     <string>com.stocktracker.check</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/nikhil.patel/Documents/Development/personal/stock-tracker/.venv/bin/stocktracker</string>
+        <string>/Users/username/path/to/stock-tracker/.venv/bin/stocktracker</string>
         <string>check</string>
     </array>
     <key>StartInterval</key>
     <integer>1800</integer>
     <key>StandardOutPath</key>
-    <string>/Users/nikhil.patel/Documents/Development/personal/stock-tracker/data/launchd.log</string>
+    <string>/Users/username/path/to/stock-tracker/data/launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/nikhil.patel/Documents/Development/personal/stock-tracker/data/launchd.log</string>
+    <string>/Users/username/path/to/stock-tracker/data/launchd.log</string>
 </dict>
 </plist>
 ```
@@ -153,6 +169,10 @@ Then load it:
 launchctl load ~/Library/LaunchAgents/com.stocktracker.check.plist
 # To stop: launchctl unload ~/Library/LaunchAgents/com.stocktracker.check.plist
 ```
+
+If `launchctl list | grep stock` shows the job loaded but with no PID and a non-zero
+exit, check `data/launchd.log` — a `PermissionError ... Operation not permitted`
+there is the protected-folder issue above.
 
 ## Tests
 
