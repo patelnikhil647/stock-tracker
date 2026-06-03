@@ -20,8 +20,10 @@ than a configured percentage (default **15%**) below its 52-week high.
 ```bash
 cd stock-tracker
 python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -e ".[dev]"
 ```
+> Note: Editable install needs pip >= 21.3 (PEP 660)
 
 ### 2. Initialize your config
 
