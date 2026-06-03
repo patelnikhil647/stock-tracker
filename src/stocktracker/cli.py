@@ -182,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rm = sub.add_parser("remove", help="Remove one or more tickers from the watchlist")
     p_rm.add_argument("tickers", nargs="+", metavar="TICKER")
     sub.add_parser("list", help="List watched tickers and thresholds")
-    sub.add_parser("status", help="Show current price, 52wk high, drop %, and state")
+    sub.add_parser("status", help="Show current price, 52wk high, drop %%, and state")
     sub.add_parser("test-notify", help="Send a test notification to your phone")
 
     return parser
