@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from . import notify, prices
 from .config import Config, Watchlist
@@ -34,17 +36,22 @@ def run_cycle(config: Config, watchlist: Watchlist) -> list[TickerResult]:
     Returns a per-ticker result list for logging / the `status` command.
     """
     results: list[TickerResult] = []
+    # Calendar date in the market timezone: the 52-week high is cached per day, so
+    # this is the key that decides cache hit vs. a fresh year-of-bars fetch.
+    today = datetime.now(ZoneInfo(config.market_hours.timezone)).date().isoformat()
     with StateStore(config.state_db) as store:
         for entry in watchlist.entries:
             threshold = entry.threshold if entry.threshold is not None else config.threshold
             result = TickerResult(ticker=entry.ticker, threshold=threshold)
             try:
-                quote = prices.get_quote(entry.ticker)
+                cached_high = store.get_cached_high(entry.ticker, today)
+                quote = prices.get_quote(entry.ticker, cached_high=cached_high)
             except prices.PriceError as exc:
                 result.error = str(exc)
                 log.warning("price error for %s: %s", entry.ticker, exc)
                 results.append(result)
                 continue
+            store.set_cached_high(entry.ticker, quote.week52_high, today)
 
             result.price = quote.price
             result.week52_high = quote.week52_high

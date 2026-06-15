@@ -46,3 +46,32 @@ def test_exactly_at_threshold_triggers(store):
 def test_last_drop_pct_persisted(store):
     store.evaluate("SCHD", drop_pct=0.12, threshold=0.15)
     assert store.get("SCHD").last_drop_pct == pytest.approx(0.12)
+
+
+# --- 52-week high cache ------------------------------------------------------
+
+
+def test_cached_high_miss_when_absent(store):
+    assert store.get_cached_high("VOO", "2026-06-13") is None
+
+
+def test_cached_high_round_trip_same_day(store):
+    store.set_cached_high("VOO", 123.45, "2026-06-13")
+    assert store.get_cached_high("VOO", "2026-06-13") == pytest.approx(123.45)
+
+
+def test_cached_high_miss_on_different_day(store):
+    store.set_cached_high("VOO", 123.45, "2026-06-12")
+    assert store.get_cached_high("VOO", "2026-06-13") is None
+
+
+def test_cached_high_upsert_overwrites(store):
+    store.set_cached_high("VOO", 100.0, "2026-06-13")
+    store.set_cached_high("VOO", 150.0, "2026-06-13")
+    assert store.get_cached_high("VOO", "2026-06-13") == pytest.approx(150.0)
+
+
+def test_delete_clears_cached_high(store):
+    store.set_cached_high("VOO", 100.0, "2026-06-13")
+    store.delete("VOO")
+    assert store.get_cached_high("VOO", "2026-06-13") is None

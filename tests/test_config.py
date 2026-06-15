@@ -1,8 +1,9 @@
+import os
 import textwrap
 
 import pytest
 
-from stocktracker.config import load_config
+from stocktracker.config import load_config, load_dotenv
 
 VALID = textwrap.dedent(
     """
@@ -43,3 +44,64 @@ def test_command_topic_defaults_empty_when_absent(tmp_path):
     p.write_text('ntfy:\n  topic: "a-b-c"\n')
     cfg = load_config(path=p)
     assert cfg.ntfy.command_topic == ""
+
+
+# --- load_dotenv -------------------------------------------------------------
+
+
+def test_dotenv_missing_file_is_noop(tmp_path, monkeypatch):
+    monkeypatch.delenv("_DOTENV_TEST_KEY", raising=False)
+    load_dotenv(tmp_path / ".env")  # must not raise
+
+
+def test_dotenv_loads_bare_key_value(tmp_path, monkeypatch):
+    monkeypatch.delenv("_DOTENV_TEST_KEY", raising=False)
+    p = tmp_path / ".env"
+    p.write_text("_DOTENV_TEST_KEY=hello\n")
+    load_dotenv(p)
+    assert os.environ.get("_DOTENV_TEST_KEY") == "hello"
+    monkeypatch.delenv("_DOTENV_TEST_KEY")
+
+
+def test_dotenv_strips_double_quotes(tmp_path, monkeypatch):
+    monkeypatch.delenv("_DOTENV_TEST_KEY", raising=False)
+    p = tmp_path / ".env"
+    p.write_text('_DOTENV_TEST_KEY="quoted value"\n')
+    load_dotenv(p)
+    assert os.environ.get("_DOTENV_TEST_KEY") == "quoted value"
+    monkeypatch.delenv("_DOTENV_TEST_KEY")
+
+
+def test_dotenv_strips_single_quotes(tmp_path, monkeypatch):
+    monkeypatch.delenv("_DOTENV_TEST_KEY", raising=False)
+    p = tmp_path / ".env"
+    p.write_text("_DOTENV_TEST_KEY='sq'\n")
+    load_dotenv(p)
+    assert os.environ.get("_DOTENV_TEST_KEY") == "sq"
+    monkeypatch.delenv("_DOTENV_TEST_KEY")
+
+
+def test_dotenv_export_prefix(tmp_path, monkeypatch):
+    monkeypatch.delenv("_DOTENV_TEST_KEY", raising=False)
+    p = tmp_path / ".env"
+    p.write_text("export _DOTENV_TEST_KEY=exported\n")
+    load_dotenv(p)
+    assert os.environ.get("_DOTENV_TEST_KEY") == "exported"
+    monkeypatch.delenv("_DOTENV_TEST_KEY")
+
+
+def test_dotenv_does_not_override_existing_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("_DOTENV_TEST_KEY", "original")
+    p = tmp_path / ".env"
+    p.write_text("_DOTENV_TEST_KEY=overwrite\n")
+    load_dotenv(p)
+    assert os.environ.get("_DOTENV_TEST_KEY") == "original"
+
+
+def test_dotenv_skips_comments_and_blanks(tmp_path, monkeypatch):
+    monkeypatch.delenv("_DOTENV_TEST_KEY", raising=False)
+    p = tmp_path / ".env"
+    p.write_text("# comment\n\n_DOTENV_TEST_KEY=real\n# another comment\n")
+    load_dotenv(p)
+    assert os.environ.get("_DOTENV_TEST_KEY") == "real"
+    monkeypatch.delenv("_DOTENV_TEST_KEY")

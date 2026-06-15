@@ -4,7 +4,9 @@ A personal ETF drop-alert tool. It checks your watchlist of ETFs and pushes a
 notification to your phone (via [ntfy](https://ntfy.sh/)) whenever one falls more
 than a configured percentage (default **15%**) below its 52-week high.
 
-- **Data:** [`yfinance`](https://pypi.org/project/yfinance/) — free, no API key.
+- **Data:** [Alpaca](https://alpaca.markets/) market data (set an API key — see
+  [Price data](#price-data)), with [`yfinance`](https://pypi.org/project/yfinance/)
+  as an automatic fallback when no key is set.
 - **Alerts:** ntfy — free, open-source push notifications.
 - **Cadence (MVP):** alerts **once per crossing**. Once an ETF drops past the
   threshold you get one alert; you won't get another until it recovers above the
@@ -106,6 +108,39 @@ tickers:
     threshold: 0.10   # alert SCHD at 10% instead of the global 15%
 ```
 
+## Price data
+
+Prices and 52-week highs come from **Alpaca** when an API key is configured, and
+fall back to **yfinance** automatically when it isn't (so the tool still works
+with zero setup). Get free API keys from your
+[Alpaca dashboard](https://app.alpaca.markets/).
+
+**Option 1 — `.env` file** (simplest for local use): create a `.env` file at the
+project root (it's already gitignored):
+
+```
+APCA_API_KEY_ID=your-key-id
+APCA_API_SECRET_KEY=your-secret-key
+```
+
+`stocktracker` loads this file automatically on every run.
+
+**Option 2 — shell environment**: export the variables before running:
+
+```bash
+export APCA_API_KEY_ID="your-key-id"
+export APCA_API_SECRET_KEY="your-secret-key"
+```
+
+The free Alpaca data tier uses the **IEX** feed, which is the default. If you have
+a paid SIP subscription, set `ALPACA_DATA_FEED=sip`. (Alpaca has no native
+52-week-high field, so it's computed from ~1 year of daily bars.)
+
+The `.env` file works for scheduled jobs too — launchd and cron both invoke
+`stocktracker` directly, which loads `.env` at startup the same way a shell
+invocation does. With no `.env` and no keys in the environment, every quote
+silently uses yfinance.
+
 ## Running it 24/7
 
 Pick **one** scheduler. Both call `check` every 30 minutes; the market-hours guard
@@ -184,14 +219,14 @@ there is the protected-folder issue above.
 
 ## Roadmap
 
-### Phase 1 — MVP (current)
+### Phase 1 — MVP 
 - Watchlist monitoring, once-per-crossing alerts, ntfy push, scheduling.
 - **`check --ignore-market-hours` (`-i`):** force a one-off cycle when the market
   is closed, for manual testing.
 
-### Phase 2 — Setup, batch management, and daily reminders
+### Phase 2 — Setup, batch management, and daily reminders (current)
 - ✅ **Batch `add`/`remove`:** accept many tickers in one command. `add` validates
-  each symbol via yfinance and skips unresolved ones with a warning; `remove` warns
+  each symbol via the price provider and skips unresolved ones with a warning; `remove` warns
   on tickers not present and cleans up their stored state.
 - ✅ **`stocktracker init` bootstrap:** one command creates a gitignored
   `config.yaml` (with a freshly generated random topic) and a `watchlist.yaml`

@@ -200,6 +200,7 @@ _HANDLERS = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    cfg.load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     _setup_logging(getattr(args, "verbose", False))

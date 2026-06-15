@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import os
+
 import yaml
 
 # Project root = two levels up from this file (src/stocktracker/config.py).
@@ -74,6 +76,36 @@ class Watchlist:
     @property
     def tickers(self) -> list[str]:
         return [e.ticker for e in self.entries]
+
+
+def load_dotenv(path: Path = PROJECT_ROOT / ".env") -> None:
+    """Load key=value pairs from a .env file into os.environ (missing file is a no-op).
+
+    Existing environment variables are never overridden — the real env wins.
+    Supports blank lines, # comments, optional 'export ' prefix, and
+    single/double-quoted values.
+    """
+    if not path.exists():
+        return
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
 
 
 def _parse_hhmm(value: str) -> time:

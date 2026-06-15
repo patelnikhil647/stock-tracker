@@ -19,6 +19,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 ARMED = "ARMED"
 TRIGGERED = "TRIGGERED"
@@ -31,6 +32,14 @@ CREATE TABLE IF NOT EXISTS ticker_state (
     last_alert_ts TEXT,
     last_drop_pct REAL,
     updated_at    TEXT NOT NULL
+);
+
+-- Caches the 52-week high (which only changes once per day) so the recurring
+-- `check` cycle can skip refetching a year of daily bars from the price API.
+CREATE TABLE IF NOT EXISTS high_cache (
+    ticker      TEXT PRIMARY KEY,
+    week52_high REAL NOT NULL,
+    as_of_date  TEXT NOT NULL
 );
 """
 
@@ -54,7 +63,7 @@ class StateStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute(_SCHEMA)
+        self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
     def close(self) -> None:
@@ -83,7 +92,38 @@ class StateStore:
 
     def delete(self, ticker: str) -> None:
         """Remove a ticker's stored state (e.g. when it leaves the watchlist)."""
-        self._conn.execute("DELETE FROM ticker_state WHERE ticker = ?", (ticker.upper(),))
+        ticker = ticker.upper()
+        self._conn.execute("DELETE FROM ticker_state WHERE ticker = ?", (ticker,))
+        self._conn.execute("DELETE FROM high_cache WHERE ticker = ?", (ticker,))
+        self._conn.commit()
+
+    def get_cached_high(self, ticker: str, today: str) -> Optional[float]:
+        """Return the cached 52-week high for `ticker` if it was stored on `today`.
+
+        `today` is a calendar-date string (the caller decides the timezone). A
+        miss — no row, or a row from an earlier day — returns None so the caller
+        refetches and re-caches.
+        """
+        row = self._conn.execute(
+            "SELECT week52_high, as_of_date FROM high_cache WHERE ticker = ?",
+            (ticker.upper(),),
+        ).fetchone()
+        if row is None or row["as_of_date"] != today:
+            return None
+        return float(row["week52_high"])
+
+    def set_cached_high(self, ticker: str, high: float, today: str) -> None:
+        """Upsert the cached 52-week high for `ticker`, stamped with `today`."""
+        self._conn.execute(
+            """
+            INSERT INTO high_cache (ticker, week52_high, as_of_date)
+            VALUES (?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                week52_high=excluded.week52_high,
+                as_of_date=excluded.as_of_date
+            """,
+            (ticker.upper(), float(high), today),
+        )
         self._conn.commit()
 
     def _upsert(self, st: TickerState) -> None:
