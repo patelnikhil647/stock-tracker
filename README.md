@@ -8,9 +8,10 @@ than a configured percentage (default **15%**) below its 52-week high.
   [Price data](#price-data)), with [`yfinance`](https://pypi.org/project/yfinance/)
   as an automatic fallback when no key is set.
 - **Alerts:** ntfy — free, open-source push notifications.
-- **Cadence (MVP):** alerts **once per crossing**. Once an ETF drops past the
-  threshold you get one alert; you won't get another until it recovers above the
-  threshold and crosses back down.
+- **Cadence:** one alert when an ETF first drops past the threshold, then a
+  **daily reminder** for each later day it stays below (at most one per calendar
+  day, market timezone), and a **recovery notification** when it climbs back above
+  the threshold — after which it re-arms for the next crossing.
 
 > Single-user, run-it-on-your-own-laptop tool. No Charles Schwab integration yet
 > (see [Roadmap](#roadmap)).
@@ -143,8 +144,10 @@ silently uses yfinance.
 
 ## Running it 24/7
 
-Pick **one** scheduler. Both call `check` every 30 minutes; the market-hours guard
-keeps off-hours runs cheap and silent.
+Pick **one** scheduler. Both fire on the wall clock at **:00 and :30** each hour
+(not relative to when the machine wakes). launchd runs all day; cron is restricted
+to market hours (Mon–Fri 6am–1pm). Either way the market-hours guard keeps any
+off-hours runs cheap and silent — which is why the all-day launchd schedule is fine.
 
 > ⚠️ **macOS: don't keep the project in `~/Documents`, `~/Desktop`, or
 > `~/Downloads`.** Those folders are protected by macOS privacy (TCC), and
@@ -167,8 +170,14 @@ crontab -e
 ```
 
 ```cron
-*/30 * * * * /Users/username/path/to/stock-tracker/.venv/bin/stocktracker check >> /Users/username/path/to/stock-tracker/data/cron.log 2>&1
+*/30 6-13 * * 1-5 /Users/username/path/to/stock-tracker/.venv/bin/stocktracker check >> /Users/username/path/to/stock-tracker/data/cron.log 2>&1
 ```
+
+This runs Mon–Fri at :00 and :30 from 06:00 through 13:30 (local time) — your usual
+market window. (The window ends at 13:30 rather than exactly 13:00 to keep the minute
+field a clean `*/30`; the extra 13:30 run is a harmless no-op.) cron fires on the wall
+clock and **skips** runs that fall while the machine is asleep — it does not catch them
+up on wake — so it already behaves the way you want.
 
 (macOS note: `cron` is subject to the same protected-folder rule; if you keep the
 project under a protected folder you must grant Full Disk Access to `/usr/sbin/cron`.)
@@ -190,8 +199,11 @@ absolute paths — `~` is not expanded):
         <string>/Users/username/path/to/stock-tracker/.venv/bin/stocktracker</string>
         <string>check</string>
     </array>
-    <key>StartInterval</key>
-    <integer>1800</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Minute</key><integer>30</integer></dict>
+    </array>
     <key>StandardOutPath</key>
     <string>/Users/username/path/to/stock-tracker/data/launchd.log</string>
     <key>StandardErrorPath</key>
@@ -199,6 +211,15 @@ absolute paths — `~` is not expanded):
 </dict>
 </plist>
 ```
+
+`StartCalendarInterval` fires on the wall clock — at :00 and :30 of every hour
+(wake at 9:15 → next run 9:30, then 10:00, …), unlike `StartInterval`, which counts
+a fixed number of seconds from when the job loaded/woke. Runs scheduled while the
+machine is asleep are skipped, **except** launchd runs a single catch-up on wake if a
+boundary was missed (wake at 9:45 → the 9:30 run fires once immediately, then 10:00).
+That catch-up is harmless — `check` is a no-op outside market hours and alerts at most
+once per ticker per day. The schedule runs all day; the market-hours guard handles
+off-hours, so there's no need to encode a time window in the plist.
 
 Then load it:
 
@@ -231,12 +252,14 @@ there is the protected-folder issue above.
 - ✅ **`stocktracker init` bootstrap:** one command creates a gitignored
   `config.yaml` (with a freshly generated random topic) and a `watchlist.yaml`
   seeded with `VOO` — so you never have to invent a topic or risk committing it.
-- **Daily reminders + tappable suppress** (next): while an ETF stays below the
-  threshold, send a daily reminder until you tap a **Suppress** action button on
-  the notification; resume only after it recovers above threshold and re-crosses.
-  The button posts to a private `command_topic`, and a long-running
-  `stocktracker listen` service (outbound-only, no inbound exposure) applies the
-  suppress. The `SUPPRESSED` state is already scaffolded for this.
+- ✅ **Daily reminders + recovery notification:** while an ETF stays below the
+  threshold, send one reminder per calendar day; when it climbs back above the
+  threshold, send a recovery notification and re-arm.
+- **Tappable suppress** (next): a **Suppress** action button on the reminder to
+  silence it while still below threshold. The button posts to a private
+  `command_topic`, and a long-running `stocktracker listen` service
+  (outbound-only, no inbound exposure) applies the suppress. The `SUPPRESSED`
+  state is already scaffolded for this.
 
 ### Phase 3 — Charles Schwab integration
 - Auto-import your real holdings (so the watchlist self-populates) and reply to an

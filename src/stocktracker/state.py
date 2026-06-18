@@ -3,14 +3,19 @@
 States:
   ARMED      - drop < threshold (or never triggered). Ready to fire on a crossing.
   TRIGGERED  - drop >= threshold; an alert has already fired.
-  SUPPRESSED - (phase 2) user silenced daily reminders while still below threshold.
+  SUPPRESSED - (future) user silenced daily reminders while still below threshold.
 
-MVP transitions:
-  ARMED -> TRIGGERED   when drop crosses >= threshold  => caller sends an alert
-  TRIGGERED -> ARMED   when drop recovers < threshold  => silent re-arm
+`evaluate` returns one of the EVENT_* constants telling the caller what (if any)
+notification to send for one observation:
+  ARMED + below threshold              -> TRIGGERED, EVENT_ALERT
+  TRIGGERED + below on a new day       -> stay TRIGGERED, EVENT_REMINDER
+  TRIGGERED + below, already notified   -> stay TRIGGERED, EVENT_NONE
+  TRIGGERED + recovered above threshold -> ARMED, EVENT_RECOVERED
+  ARMED + above threshold              -> stay ARMED, EVENT_NONE
 
-The SUPPRESSED state and daily-reminder logic are scaffolded for phase 2 but are
-not exercised by the MVP monitor.
+"Once per day" uses a calendar-date string (`today`) the caller supplies in the
+market timezone, stored in `last_notify_date`. The SUPPRESSED state stays
+scaffolded for a future tappable-suppress feature and is not yet exercised.
 """
 
 from __future__ import annotations
@@ -25,13 +30,20 @@ ARMED = "ARMED"
 TRIGGERED = "TRIGGERED"
 SUPPRESSED = "SUPPRESSED"
 
+# Notification events returned by `evaluate`.
+EVENT_NONE = "NONE"
+EVENT_ALERT = "ALERT"
+EVENT_REMINDER = "REMINDER"
+EVENT_RECOVERED = "RECOVERED"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS ticker_state (
-    ticker        TEXT PRIMARY KEY,
-    state         TEXT NOT NULL DEFAULT 'ARMED',
-    last_alert_ts TEXT,
-    last_drop_pct REAL,
-    updated_at    TEXT NOT NULL
+    ticker          TEXT PRIMARY KEY,
+    state           TEXT NOT NULL DEFAULT 'ARMED',
+    last_alert_ts   TEXT,
+    last_drop_pct   REAL,
+    last_notify_date TEXT,
+    updated_at      TEXT NOT NULL
 );
 
 -- Caches the 52-week high (which only changes once per day) so the recurring
@@ -50,6 +62,7 @@ class TickerState:
     state: str
     last_alert_ts: str | None
     last_drop_pct: float | None
+    last_notify_date: str | None
     updated_at: str
 
 
@@ -64,7 +77,18 @@ class StateStore:
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns missing from DBs created by older schema versions.
+
+        `CREATE TABLE IF NOT EXISTS` never alters an existing table, so a live DB
+        from before `last_notify_date` was added would lack the column.
+        """
+        cols = {row["name"] for row in self._conn.execute("PRAGMA table_info(ticker_state)")}
+        if "last_notify_date" not in cols:
+            self._conn.execute("ALTER TABLE ticker_state ADD COLUMN last_notify_date TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -81,12 +105,13 @@ class StateStore:
             "SELECT * FROM ticker_state WHERE ticker = ?", (ticker,)
         ).fetchone()
         if row is None:
-            return TickerState(ticker, ARMED, None, None, _utcnow())
+            return TickerState(ticker, ARMED, None, None, None, _utcnow())
         return TickerState(
             ticker=row["ticker"],
             state=row["state"],
             last_alert_ts=row["last_alert_ts"],
             last_drop_pct=row["last_drop_pct"],
+            last_notify_date=row["last_notify_date"],
             updated_at=row["updated_at"],
         )
 
@@ -129,40 +154,61 @@ class StateStore:
     def _upsert(self, st: TickerState) -> None:
         self._conn.execute(
             """
-            INSERT INTO ticker_state (ticker, state, last_alert_ts, last_drop_pct, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO ticker_state
+                (ticker, state, last_alert_ts, last_drop_pct, last_notify_date, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(ticker) DO UPDATE SET
                 state=excluded.state,
                 last_alert_ts=excluded.last_alert_ts,
                 last_drop_pct=excluded.last_drop_pct,
+                last_notify_date=excluded.last_notify_date,
                 updated_at=excluded.updated_at
             """,
-            (st.ticker, st.state, st.last_alert_ts, st.last_drop_pct, st.updated_at),
+            (
+                st.ticker,
+                st.state,
+                st.last_alert_ts,
+                st.last_drop_pct,
+                st.last_notify_date,
+                st.updated_at,
+            ),
         )
         self._conn.commit()
 
-    def evaluate(self, ticker: str, drop_pct: float, threshold: float) -> bool:
-        """Apply the MVP state machine for one observation.
+    def evaluate(self, ticker: str, drop_pct: float, threshold: float, today: str) -> str:
+        """Apply the state machine for one observation; return an EVENT_* constant.
 
-        Returns True if the caller should send an alert (i.e. an ARMED ticker
-        just crossed at/above the threshold). Persists the new state either way.
+        `today` is a calendar-date string (market timezone) used to enforce the
+        "one notification per day" rule while a ticker stays below the threshold.
+        Persists the new state either way.
         """
         ticker = ticker.upper()
         current = self.get(ticker)
         below = drop_pct >= threshold
-        should_alert = False
         new_state = current.state
         last_alert_ts = current.last_alert_ts
+        last_notify_date = current.last_notify_date
+        event = EVENT_NONE
 
         if below:
             if current.state == ARMED:
+                # Fresh crossing: alert and start the per-day reminder clock.
                 new_state = TRIGGERED
-                should_alert = True
+                event = EVENT_ALERT
                 last_alert_ts = _utcnow()
-            # TRIGGERED / SUPPRESSED while still below: stay put (MVP: no re-alert).
+                last_notify_date = today
+            elif last_notify_date != today:
+                # Still below on a new day: send the daily reminder.
+                event = EVENT_REMINDER
+                last_alert_ts = _utcnow()
+                last_notify_date = today
+            # else: already notified today -> stay quiet.
         else:
-            # Recovered above the threshold: re-arm so the next crossing alerts.
+            if current.state == TRIGGERED:
+                # Recovered above the threshold: notify once, then re-arm.
+                event = EVENT_RECOVERED
             new_state = ARMED
+            last_notify_date = None
 
         self._upsert(
             TickerState(
@@ -170,7 +216,8 @@ class StateStore:
                 state=new_state,
                 last_alert_ts=last_alert_ts,
                 last_drop_pct=drop_pct,
+                last_notify_date=last_notify_date,
                 updated_at=_utcnow(),
             )
         )
-        return should_alert
+        return event
